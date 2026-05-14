@@ -2,6 +2,7 @@ from flask import Flask, render_template_string, jsonify, request
 from flask_cors import CORS
 import subprocess
 import requests
+import threading
 
 from cluster_manager import get_servers, register_server, remove_server as remove_from_cluster
 
@@ -39,8 +40,9 @@ nav h1 span{color:var(--accent);}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:0.4;transform:scale(0.8);}}
 .page{padding:20px 24px;}
 .top-row{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:16px;}
-.mid-row{display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:16px;margin-bottom:16px;}
-.bot-row{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;}
+.mid-row{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px;}
+.mid-row-charts{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:16px;}
+.bot-row{display:grid;grid-template-columns:1fr;gap:16px;}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px 20px;position:relative;overflow:hidden;}
 .card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:0.5;}
 .card.accent2::before{background:linear-gradient(90deg,transparent,var(--accent2),transparent);}
@@ -74,13 +76,6 @@ button:active{transform:scale(0.97);}
 .mr-stage .stage-name{color:var(--accent3);font-size:9px;letter-spacing:1px;text-transform:uppercase;}
 .mr-stage .stage-val{color:#fff;font-size:14px;font-weight:bold;margin-top:2px;}
 .mr-arrow{color:var(--muted);font-size:16px;}
-.traffic-bar{margin-bottom:10px;}
-.traffic-label{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:4px;}
-.bar-track{background:#0d1f36;border-radius:4px;height:8px;overflow:hidden;}
-.bar-fill{height:100%;border-radius:4px;transition:width 0.5s ease;}
-.bar-low{background:var(--green);}
-.bar-medium{background:var(--accent2);}
-.bar-high{background:var(--red);}
 .health-row{display:flex;align-items:center;padding:7px 10px;border-radius:6px;margin-bottom:6px;background:#0d1f36;font-family:var(--mono);font-size:12px;gap:10px;}
 .health-status{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
 .alive{background:var(--green);box-shadow:0 0 6px var(--green);}
@@ -131,16 +126,16 @@ button:active{transform:scale(0.97);}
         <div class="card accent3">
             <div class="sec-title">MapReduce Pipeline (Leader)</div>
             <div class="mr-pipeline">
-                <div class="mr-stage"><div class="stage-name">INPUT</div><div class="stage-val" id="mrInput">0</div></div>
-                <div class="mr-arrow">→</div>
-                <div class="mr-stage"><div class="stage-name">SPLIT</div><div class="stage-val">4</div></div>
-                <div class="mr-arrow">→</div>
-                <div class="mr-stage"><div class="stage-name">MAP W1</div><div class="stage-val" id="w1">…</div></div>
-                <div class="mr-stage"><div class="stage-name">MAP W2</div><div class="stage-val" id="w2">…</div></div>
-                <div class="mr-stage"><div class="stage-name">MAP W3</div><div class="stage-val" id="w3">…</div></div>
-                <div class="mr-stage"><div class="stage-name">MAP W4</div><div class="stage-val" id="w4">…</div></div>
-                <div class="mr-arrow">→</div>
-                <div class="mr-stage"><div class="stage-name">REDUCE</div><div class="stage-val" id="mrReduce">—</div></div>
+                <div class="mr-stage" id="inputStage" style="display:none;"><div class="stage-name">INPUT</div><div class="stage-val" id="mrInput">0</div></div>
+                <div class="mr-arrow" id="arrow1" style="display:none;">→</div>
+                <div id="mapWrapper" style="display:none;display:contents;">
+                    <div class="mr-stage"><div class="stage-name">MAP W1</div><div class="stage-val" id="w1">…</div></div>
+                    <div class="mr-stage"><div class="stage-name">MAP W2</div><div class="stage-val" id="w2">…</div></div>
+                    <div class="mr-stage"><div class="stage-name">MAP W3</div><div class="stage-val" id="w3">…</div></div>
+                    <div class="mr-stage"><div class="stage-name">MAP W4</div><div class="stage-val" id="w4">…</div></div>
+                </div>
+                <div class="mr-arrow" id="arrow2" style="display:none;">→</div>
+                <div class="mr-stage" id="reduceStage" style="display:none;"><div class="stage-name">REDUCE</div><div class="stage-val" id="mrReduce">—</div></div>
             </div>
             <div style="margin-top:12px;">
                 <div class="card-label">Temperature Range</div>
@@ -151,21 +146,6 @@ button:active{transform:scale(0.97);}
             </div>
         </div>
         <div class="card accent2">
-            <div class="sec-title">Traffic Distribution</div>
-            <div class="traffic-bar">
-                <div class="traffic-label"><span>LOW</span><span id="trafficLow">0</span></div>
-                <div class="bar-track"><div class="bar-fill bar-low" id="barLow" style="width:0%"></div></div>
-            </div>
-            <div class="traffic-bar">
-                <div class="traffic-label"><span>MEDIUM</span><span id="trafficMed">0</span></div>
-                <div class="bar-track"><div class="bar-fill bar-medium" id="barMed" style="width:0%"></div></div>
-            </div>
-            <div class="traffic-bar">
-                <div class="traffic-label"><span>HIGH</span><span id="trafficHigh">0</span></div>
-                <div class="bar-track"><div class="bar-fill bar-high" id="barHigh" style="width:0%"></div></div>
-            </div>
-        </div>
-        <div class="card">
             <div class="sec-title">Cluster Controls</div>
             <div class="card-label" style="margin-bottom:6px;">Sensors (20 workers)</div>
             <div class="btn-row">
@@ -186,53 +166,84 @@ button:active{transform:scale(0.97);}
             </div>
         </div>
     </div>
-    <div class="bot-row">
+    <div class="mid-row-charts">
         <div class="card">
             <div class="sec-title">Live Node Status</div>
             <div class="nodes-grid" id="nodesGrid">
                 <div style="color:var(--muted);font-family:var(--mono);font-size:12px;">Waiting for servers…</div>
             </div>
-            <div class="sec-title" style="margin-top:20px;">Parallel Health Check (Leader → Followers)</div>
+            <div class="sec-title" style="margin-top:16px;">Parallel Health Check</div>
             <div id="healthList"><div style="color:var(--muted);font-family:var(--mono);font-size:12px;">—</div></div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:16px;">
-            <div class="card">
-                <div class="sec-title">Temperature Feed</div>
-                <canvas id="tempChart" height="130"></canvas>
-            </div>
-            <div class="card">
-                <div class="sec-title">Leader Log</div>
-                <div class="log-box" id="logBox"></div>
-            </div>
+        <div class="card">
+            <div class="sec-title">Temperature Feed</div>
+            <canvas id="tempChart" height="180"></canvas>
+        </div>
+        <div class="card">
+            <div class="sec-title">Average Temperature Trend</div>
+            <canvas id="avgTempChart" height="180"></canvas>
         </div>
     </div>
+    <div class="bot-row">
+        <div class="card">
+            <div class="sec-title">Leader Log</div>
+            <div class="log-box" id="logBox"></div>
+        </div>
 </div>
 </div>
 <div id="toast"></div>
 <script>
 let chart;
+let avgTempChart;
 let tempHistory = [];
 const MAX_HISTORY = 40;
 
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
 function setEl(id,val){const el=document.getElementById(id);if(el)el.textContent=val;}
 
-function updateAnalytics(analytics,records){
+function updateAnalytics(analytics,records,mapReduceResults){
     if(!analytics)return;
     setEl('avgTemp',analytics.avg_temp?analytics.avg_temp+'°C':'—');
     setEl('minTemp',analytics.min_temp?analytics.min_temp+'°C':'—');
     setEl('maxTemp',analytics.max_temp?analytics.max_temp+'°C':'—');
     setEl('activeSensors',analytics.active_sensors||'—');
     setEl('mrInput',records||0);
-    setEl('mrReduce',analytics.avg_temp?analytics.avg_temp+'°C':'—');
-    const total=records||0,chunk=Math.floor(total/4);
-    setEl('w1',chunk);setEl('w2',chunk);setEl('w3',chunk);setEl('w4',total-chunk*3);
-    const tc=analytics.traffic_counts||{};
-    const lo=tc.low||0,me=tc.medium||0,hi=tc.high||0,tot=lo+me+hi||1;
-    setEl('trafficLow',lo);setEl('trafficMed',me);setEl('trafficHigh',hi);
-    document.getElementById('barLow').style.width=(lo/tot*100)+'%';
-    document.getElementById('barMed').style.width=(me/tot*100)+'%';
-    document.getElementById('barHigh').style.width=(hi/tot*100)+'%';
+    
+    // Show INPUT stage only when there are records
+    const hasInput=records>0;
+    document.getElementById('inputStage').style.display=hasInput?'flex':'none';
+    document.getElementById('arrow1').style.display=hasInput?'inline':'none';
+    
+    // Check if any MAP results exist
+    const hasMapResults=mapReduceResults && Object.keys(mapReduceResults).length>0 && 
+        Object.values(mapReduceResults).some(r=>r.count&&r.count>0);
+    document.getElementById('mapWrapper').style.display=hasMapResults?'contents':'none';
+    document.getElementById('arrow2').style.display=(hasInput&&hasMapResults)?'inline':'none';
+    
+    // Display FINAL REDUCE result (leader's aggregation)
+    const hasReduce=analytics.avg_temp!==0&&analytics.avg_temp;
+    setEl('mrReduce',hasReduce?`${analytics.avg_temp}°C (Final)`:'—');
+    document.getElementById('reduceStage').style.display=hasReduce?'flex':'none';
+    
+    // Display actual MapReduce worker results from MAP phase
+    if(mapReduceResults && Object.keys(mapReduceResults).length > 0){
+        const workers=Object.entries(mapReduceResults).sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
+        const labels=['w1','w2','w3','w4'];
+        for(let i=0;i<labels.length;i++){
+            if(workers[i]){
+                const [workerId,result]=workers[i];
+                if(result && result.count && result.count > 0){
+                    setEl(labels[i],`W${workerId}: ${result.avg}°C (${result.count})`);
+                }else{
+                    setEl(labels[i],'…');
+                }
+            }else{
+                setEl(labels[i],'…');
+            }
+        }
+    }else{
+        setEl('w1','…');setEl('w2','…');setEl('w3','…');setEl('w4','…');
+    }
 }
 
 function updateChart(data){
@@ -243,6 +254,17 @@ function updateChart(data){
     chart=new Chart(document.getElementById('tempChart'),{
         type:'line',
         data:{labels:histLabels,datasets:[{label:'Temperature (°C)',data:tempHistory,borderColor:'#00e5ff',backgroundColor:'rgba(0,229,255,0.08)',borderWidth:2,pointRadius:0,tension:0.4,fill:true}]},
+        options:{animation:false,plugins:{legend:{display:false}},scales:{x:{display:false},y:{ticks:{color:'#4a7fa5',font:{family:'Share Tech Mono',size:10}},grid:{color:'rgba(26,58,92,0.5)'}}}}
+    });
+}
+
+function updateAvgTempChart(avgTempHistory){
+    if(!avgTempHistory || avgTempHistory.length === 0) return;
+    const histLabels=avgTempHistory.map((_,i)=>i+1);
+    if(avgTempChart)avgTempChart.destroy();
+    avgTempChart=new Chart(document.getElementById('avgTempChart'),{
+        type:'line',
+        data:{labels:histLabels,datasets:[{label:'Average Temperature (°C)',data:avgTempHistory,borderColor:'#ff6b35',backgroundColor:'rgba(255,107,53,0.08)',borderWidth:2,pointRadius:4,pointBackgroundColor:'#ff6b35',tension:0.4,fill:true}]},
         options:{animation:false,plugins:{legend:{display:false}},scales:{x:{display:false},y:{ticks:{color:'#4a7fa5',font:{family:'Share Tech Mono',size:10}},grid:{color:'rgba(26,58,92,0.5)'}}}}
     });
 }
@@ -286,8 +308,16 @@ async function fetchData(){
                     setEl('records',data.records);
                     updateChart(data.data);
                     updateLogs(data.logs);
-                    updateAnalytics(data.analytics,data.records);
+                    updateAnalytics(data.analytics,data.records,data.mapreduce_results);
                     await fetchHealth(s.url);
+                    // Fetch average temperature history
+                    try{
+                        const histRes=await fetch(s.url+'/avg_temp_history');
+                        if(histRes.ok){
+                            const history=await histRes.json();
+                            updateAvgTempChart(history);
+                        }
+                    }catch{}
                 }
             }catch{}
         }
@@ -296,7 +326,28 @@ async function fetchData(){
 }
 
 async function startSensors(){await fetch('/start_sensors');toast('Sensors started');}
-async function stopSensors(){await fetch('/stop_sensors');toast('Sensors stopped');}
+
+async function stopSensors(){
+    await fetch('/stop_sensors');
+    toast('Sensors stopped');
+    
+    // Find leader and clear its data
+    try{
+        const res=await fetch('/cluster_status');
+        const cluster=await res.json();
+        for(const s of cluster){
+            try{
+                const r=await fetch(s.url+'/status');
+                const data=await r.json();
+                if(data.is_leader){
+                    await fetch(s.url+'/clear_data', {method:'POST'});
+                    break;
+                }
+            }catch{}
+        }
+    }catch{}
+}
+
 async function addServer(){await fetch('/add_server');toast('New node added to cluster');}
 async function removeServer(){await fetch('/remove_server');toast('Node removed');}
 async function removeNode(serverId){await fetch(`/remove_server?id=${serverId}`);toast(`Node ${serverId} removed`);}
@@ -337,9 +388,24 @@ def stop_sensors():
 def add_server():
     global next_server_id, server_processes
     sid = next_server_id
-    p = subprocess.Popen(["python", "server.py", str(sid)])
+    
+    import platform
+    import os
+    
+    cwd = os.path.dirname(os.path.abspath(__file__))
+    
+    if platform.system() == "Windows":
+        # Open a NEW terminal window for each server on Windows
+        # Use /c (close after execution) - terminal closes when process exits
+        cmd = f'start "Server {sid}" cmd /c "cd /d {cwd} && python server.py {sid}"'
+        p = subprocess.Popen(cmd, shell=True)
+    else:
+        # Linux/Mac - open new xterm
+        p = subprocess.Popen(["xterm", "-e", f"cd {cwd}; python server.py {sid}"])
+    
     server_processes[sid] = p
     next_server_id += 1
+    print(f"[DASHBOARD] Started Server {sid} in NEW terminal window")
     return jsonify({"status": "server added", "id": sid})
 
 @app.route("/remove_server")
@@ -347,30 +413,83 @@ def remove_server():
     global server_processes
     server_id = request.args.get('id', type=int)
     
-    if server_id and server_id in server_processes:
-        p = server_processes.pop(server_id)
-        try:
-            requests.get(f"http://127.0.0.1:{5000 + server_id}/shutdown", timeout=1)
-        except Exception:
-            pass
-        import time as _t
-        _t.sleep(0.4)
-        p.kill()
-        remove_from_cluster(server_id)
-    elif len(server_processes) > 0:
-        # Remove the last added server if no id specified
-        server_id = max(server_processes.keys())
-        p = server_processes.pop(server_id)
-        try:
-            requests.get(f"http://127.0.0.1:{5000 + server_id}/shutdown", timeout=1)
-        except Exception:
-            pass
-        import time as _t
-        _t.sleep(0.4)
-        p.kill()
-        remove_from_cluster(server_id)
+    def do_remove(sid):
+        if sid and sid in server_processes:
+            p = server_processes.pop(sid)
+            try:
+                # Request graceful shutdown
+                requests.get(f"http://127.0.0.1:{5000 + sid}/shutdown", timeout=1)
+            except Exception as e:
+                print(f"[DASHBOARD] Shutdown request failed for Server {sid}: {e}")
+            
+            import time as _t
+            _t.sleep(0.3)
+            
+            # Force kill the process - terminal will close automatically with /c flag
+            p.kill()
+            try:
+                p.wait(timeout=2)
+            except:
+                pass
+            
+            from cluster_manager import get_servers
+            all_servers = get_servers()
+            
+            # Remove from cluster registry
+            remove_from_cluster(sid)
+            print(f"[DASHBOARD] ✓ Removed Server {sid} from cluster")
+            
+            # Notify remaining servers that a node was removed
+            remaining_servers = [s for s in all_servers if s["id"] != sid]
+            for server in remaining_servers:
+                try:
+                    requests.post(
+                        server["url"] + "/node_removed",
+                        json={"removed_id": sid, "current_leader": None},
+                        timeout=1
+                    )
+                except Exception as e:
+                    print(f"[DASHBOARD] Failed to notify Server {server['id']} about removal: {e}")
+            
+        elif len(server_processes) > 0:
+            # Remove the last added server if no id specified
+            sid = max(server_processes.keys())
+            p = server_processes.pop(sid)
+            try:
+                requests.get(f"http://127.0.0.1:{5000 + sid}/shutdown", timeout=1)
+            except Exception as e:
+                print(f"[DASHBOARD] Shutdown request failed for Server {sid}: {e}")
+            
+            import time as _t
+            _t.sleep(0.3)
+            
+            p.kill()
+            try:
+                p.wait(timeout=2)
+            except:
+                pass
+            
+            from cluster_manager import get_servers
+            all_servers = get_servers()
+            
+            remove_from_cluster(sid)
+            print(f"[DASHBOARD] ✓ Removed Server {sid} from cluster")
+            
+            remaining_servers = [s for s in all_servers if s["id"] != sid]
+            for server in remaining_servers:
+                try:
+                    requests.post(
+                        server["url"] + "/node_removed",
+                        json={"removed_id": sid, "current_leader": None},
+                        timeout=1
+                    )
+                except Exception as e:
+                    print(f"[DASHBOARD] Failed to notify Server {server['id']} about removal: {e}")
     
-    return jsonify({"status": "removed"})
+    # Run removal in background thread to not block UI
+    threading.Thread(target=do_remove, args=(server_id,), daemon=True).start()
+    
+    return jsonify({"status": "removing"})
 
 if __name__ == "__main__":
     import json

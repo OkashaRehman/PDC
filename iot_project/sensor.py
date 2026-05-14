@@ -8,10 +8,20 @@ from cluster_manager import get_servers
 sensor_id = int(sys.argv[1])
 
 def generate():
+    # Generate temps with significant deviation based on sensor ID for visible MapReduce results
+    if sensor_id <= 6:
+        # Cold sensors: 5-20°C
+        temp = round(random.uniform(5, 20), 2)
+    elif sensor_id <= 12:
+        # Warm sensors: 25-35°C
+        temp = round(random.uniform(25, 35), 2)
+    else:
+        # Hot sensors: 40-60°C
+        temp = round(random.uniform(40, 60), 2)
+    
     return {
         "sensor_id": sensor_id,
-        "temperature": round(random.uniform(20, 40), 2),
-        "traffic": random.choice(["low", "medium", "high"])
+        "temperature": temp
     }
 
 def get_leader():
